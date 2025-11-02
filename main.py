@@ -22,14 +22,14 @@ sys.path.insert(0, str(Path(__file__).parent / "code"))
 
 try:
     # Импортируем наши модули
-    from install import (
+    from install import (  # type: ignore # noqa: F401
         get_password, create_askpass_script, remove_askpass_script,
         run_with_password, get_username, is_yay_installed,
         install_dependencies, clone_and_build_yay, 
         install_packages_with_yay, install_packages_with_pacman,
         update_packages, YAY_PACKAGES, PACMAN_PACKAGES
     )
-    from samba_auto_setup import SambaAutoSetup
+    from samba_auto_setup import SambaAutoSetup  # type: ignore # noqa: F401
 except ImportError as e:
     print(f"❌ Ошибка импорта модулей: {e}")
     print("Убедитесь, что файлы install.py и samba_auto_setup.py находятся в папке 'code'")
