@@ -24,6 +24,25 @@ sudo python3 main.py
 sudo ./main.py
 ```
 
+### 🔐 Использование переменных окружения для паролей
+
+Для автоматизации можно использовать переменные окружения вместо ручного ввода:
+
+```bash
+# Установить переменные окружения
+export SUDO_PASSWORD="your_sudo_password"
+export SAMBA_PASSWORD="your_samba_password"
+
+# Запустить с сохранением переменных (важно: используйте -E!)
+sudo -E python3 main.py
+```
+
+**Поддерживаемые переменные:**
+- `SUDO_PASSWORD` или `AUTO_SETUP_PASSWORD` - для sudo пароля
+- `SAMBA_PASSWORD` или `AUTO_SETUP_SAMBA_PASSWORD` - для пароля Samba пользователя
+
+📖 [Подробная документация по переменным окружения](ENV_VARIABLES.md)
+
 ### Что происходит при запуске:
 
 1. **🔍 Проверка требований**

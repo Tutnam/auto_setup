@@ -8,7 +8,17 @@
 
 Пароль root запрашивается только один раз в начале!
 
-Использование: sudo python3 main.py
+Использование:
+    sudo python3 main.py
+    
+Или с переменными окружения для автоматизации:
+    export SUDO_PASSWORD="your_password"
+    export SAMBA_PASSWORD="your_samba_password"
+    sudo -E python3 main.py
+
+Поддерживаемые переменные окружения:
+    SUDO_PASSWORD или AUTO_SETUP_PASSWORD - для sudo пароля
+    SAMBA_PASSWORD или AUTO_SETUP_SAMBA_PASSWORD - для пароля Samba пользователя
 """
 
 import os
@@ -74,14 +84,21 @@ class AutoSetupMaster:
         print("✅ Все необходимые файлы найдены")
 
     def get_sudo_password(self):
-        """Запрашивает пароль sudo один раз в начале"""
+        """Запрашивает пароль sudo один раз в начале или берёт из переменной окружения"""
         print("\n🔐 Для автоматической настройки системы требуются права root")
         print("Пароль будет запрошен только один раз и использован для всех операций:")
         print("  • Установка пакетов")
         print("  • Настройка Samba сервера")
         print("  • Конфигурация системы")
         
-        self.sudo_password = getpass.getpass("\nВведите пароль sudo: ")
+        # Проверяем переменную окружения для пароля
+        env_password = os.getenv("SUDO_PASSWORD") or os.getenv("AUTO_SETUP_PASSWORD")
+        
+        if env_password:
+            self.sudo_password = env_password
+            print("\n✅ Пароль получен из переменной окружения (SUDO_PASSWORD или AUTO_SETUP_PASSWORD)")
+        else:
+            self.sudo_password = getpass.getpass("\nВведите пароль sudo: ")
         
         # Создаём askpass скрипт для автоматической передачи пароля
         try:

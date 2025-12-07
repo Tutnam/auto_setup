@@ -61,9 +61,16 @@ def check_root():
 
 
 def get_password():
-    """Получает пароль пользователя для sudo операций"""
-    password = getpass.getpass("Введите пароль пользователя для sudo операций: ")
-    return password
+    """Получает пароль пользователя для sudo операций из переменной окружения или запрашивает"""
+    # Проверяем переменную окружения для пароля
+    env_password = os.getenv("SUDO_PASSWORD") or os.getenv("AUTO_SETUP_PASSWORD")
+    
+    if env_password:
+        print("✅ Пароль получен из переменной окружения (SUDO_PASSWORD или AUTO_SETUP_PASSWORD)")
+        return env_password
+    else:
+        password = getpass.getpass("Введите пароль пользователя для sudo операций: ")
+        return password
 
 
 def create_askpass_script(password):

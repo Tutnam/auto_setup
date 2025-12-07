@@ -24,3 +24,11 @@ __pycache__/
 askpass_*.sh
 /tmp/
 
+# Файлы с паролями (никогда не коммитьте!)
+*.password
+*.passwd
+*_password*
+*_passwd*
+.env
+.env.local
+
