@@ -3,25 +3,24 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
 
-# Virtual environments
-venv/
-env/
-ENV/
+# Временные файлы
+*.py~
+*.swp
+*.swo
+*~
+.DS_Store
 
 # IDE
 .vscode/
 .idea/
-*.swp
-*.swo
+*.sublime-*
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+# Логи
 *.log
 
-# Temporary files
-*.tmp
-*~
+# Временные скрипты
+askpass_*.sh
+/tmp/
+

@@ -182,21 +182,16 @@ class SambaAutoSetup:
             print(f"❌ Ошибка создания конфигурации: {e}")
             return False
 
-    def step_3_add_samba_user(self, use_sudo_password=False):
+    def step_3_add_samba_user(self):
         """Шаг 3: Добавление пользователя в Samba"""
         print("\n👤 Шаг 3: Добавление пользователя в Samba...")
         
-        # Получаем имя текущего пользователя (не root, а настоящего пользователя)
-        current_user = os.getenv("SUDO_USER") or os.getenv("USER", "boss")
+        # Получаем имя текущего пользователя
+        current_user = os.getenv("USER", "boss")
         
-        # Определяем пароль для Samba
-        if use_sudo_password and self.sudo_password:
-            samba_password = self.sudo_password
-            print(f"Добавляем пользователя '{current_user}' в Samba (используем sudo пароль)")
-        else:
-            # Запрашиваем пароль для Samba
-            print(f"Добавляем пользователя '{current_user}' в Samba")
-            samba_password = getpass.getpass(f"Введите пароль для Samba пользователя {current_user}: ")
+        # Запрашиваем пароль для Samba
+        print(f"Добавляем пользователя '{current_user}' в Samba")
+        samba_password = getpass.getpass(f"Введите пароль для Samba пользователя {current_user}: ")
         
         # Добавляем пользователя
         result = self.run_sudo_command(f"smbpasswd -a {current_user}", input_text=f"{samba_password}\n{samba_password}\n")
@@ -424,7 +419,7 @@ class SambaAutoSetup:
         steps = [
             ("Настройка прав доступа", self.step_1_set_permissions),
             ("Конфигурация smb.conf", self.step_2_configure_smb),
-            ("Добавление пользователя", lambda: self.step_3_add_samba_user(use_sudo_password=True)),
+            ("Добавление пользователя", self.step_3_add_samba_user),
             ("Управление службами", self.step_4_manage_services),
             ("Проверка статуса", self.step_5_check_status),
             ("Тестирование", self.step_6_test_connection),

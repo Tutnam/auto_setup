@@ -6,6 +6,8 @@
 1. Установка необходимых пакетов (install.py)
 2. Настройка Samba сервера (samba_auto_setup.py)
 
+Пароль root запрашивается только один раз в начале!
+
 Использование: sudo python3 main.py
 """
 
@@ -22,14 +24,14 @@ sys.path.insert(0, str(Path(__file__).parent / "code"))
 
 try:
     # Импортируем наши модули
-    from install import (  # type: ignore # noqa: F401
+    from install import (
         get_password, create_askpass_script, remove_askpass_script,
         run_with_password, get_username, is_yay_installed,
         install_dependencies, clone_and_build_yay, 
         install_packages_with_yay, install_packages_with_pacman,
         update_packages, YAY_PACKAGES, PACMAN_PACKAGES
     )
-    from samba_auto_setup import SambaAutoSetup  # type: ignore # noqa: F401
+    from samba_auto_setup import SambaAutoSetup
 except ImportError as e:
     print(f"❌ Ошибка импорта модулей: {e}")
     print("Убедитесь, что файлы install.py и samba_auto_setup.py находятся в папке 'code'")
@@ -76,7 +78,7 @@ class AutoSetupMaster:
         print("\n🔐 Для автоматической настройки системы требуются права root")
         print("Пароль будет запрошен только один раз и использован для всех операций:")
         print("  • Установка пакетов")
-        print("  • Настройка Samba сервера (включая пароль Samba пользователя)")
+        print("  • Настройка Samba сервера")
         print("  • Конфигурация системы")
         
         self.sudo_password = getpass.getpass("\nВведите пароль sudo: ")
@@ -161,7 +163,7 @@ class AutoSetupMaster:
             steps = [
                 ("Настройка прав доступа", samba_setup.step_1_set_permissions),
                 ("Конфигурация smb.conf", samba_setup.step_2_configure_smb),
-                ("Добавление пользователя", lambda: samba_setup.step_3_add_samba_user(use_sudo_password=True)),
+                ("Добавление пользователя", samba_setup.step_3_add_samba_user),
                 ("Управление службами", samba_setup.step_4_manage_services),
                 ("Проверка статуса", samba_setup.step_5_check_status),
                 ("Тестирование", samba_setup.step_6_test_connection),
