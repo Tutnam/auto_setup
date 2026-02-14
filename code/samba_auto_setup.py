@@ -18,9 +18,9 @@ class SambaAutoSetup:
     def run_sudo_command(self, command, input_text=None):
         """Выполняет команду с sudo"""
         if isinstance(command, str):
-            cmd = ["sudo", "-S"] + command.split()
+            cmd = ["sudo"] + command.split()
         else:
-            cmd = ["sudo", "-S"] + command
+            cmd = ["sudo"] + command
 
         try:
             result = subprocess.run(
