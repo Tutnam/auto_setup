@@ -2,18 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 Главный скрипт автоматической настройки системы
-Выполняет полную автоматизацию:
-1. Обновление репозиториев (pacman -Syu)
-2. Установка yay (если не установлен)
-3. Установка пакетов через yay (AUR)
-4. Установка пакетов через pacman
-5. Настройка Samba сервера
+Устанавливает все пакеты через paru и настраивает Samba.
 
 Использование:
-  sudo python3 main.py              # полная установка
-  sudo python3 main.py --only-packages   # только пакеты (шаги 1-4)
-  sudo python3 main.py --only-samba      # только Samba (шаг 5)
-  sudo python3 main.py --skip-update     # пропустить pacman -Syu
+  sudo python3 main.py                  # полная установка
+  sudo python3 main.py --only-packages  # только пакеты
+  sudo python3 main.py --only-samba     # только Samba
+  sudo python3 main.py --skip-update    # пропустить обновление системы
 """
 
 import os
@@ -28,12 +23,9 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent / "code"))
 
 try:
-    # Импортируем наши модули
     from install import (
-        get_username, is_yay_installed,
-        install_dependencies, clone_and_build_yay, 
-        install_packages_with_yay, install_packages_with_pacman,
-        update_packages, YAY_PACKAGES, PACMAN_PACKAGES
+        get_username, is_paru_installed, install_paru,
+        install_packages, update_system, PACKAGES
     )
     from samba_auto_setup import SambaAutoSetup
 except ImportError as e:
@@ -43,21 +35,17 @@ except ImportError as e:
 
 
 def setup_logging():
-    """Настраивает логирование в файл и консоль"""
+    """Настраивает логирование в файл"""
     log_dir = Path(__file__).parent / "logs"
     log_dir.mkdir(exist_ok=True)
     
     log_file = log_dir / f"setup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
-    # Формат логов
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-    
-    # Файловый обработчик
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(fmt)
     
-    # Консольный обработчик (перехватываем print через логгер)
     logger = logging.getLogger("auto_setup")
     logger.setLevel(logging.DEBUG)
     logger.addHandler(fh)
@@ -70,26 +58,19 @@ def check_internet():
     """Проверяет наличие интернет-соединения"""
     print("🌐 Проверка интернет-соединения...")
     
-    targets = [
-        ("8.8.8.8", "Google DNS"),
-        ("archlinux.org", "Arch Linux"),
-        ("aur.archlinux.org", "AUR"),
-    ]
-    
-    for host, name in targets:
+    for host, name in [("8.8.8.8", "Google DNS"), ("archlinux.org", "Arch Linux")]:
         try:
             result = subprocess.run(
                 ["ping", "-c", "1", "-W", "3", host],
                 capture_output=True, timeout=5
             )
             if result.returncode == 0:
-                print(f"  ✅ {name} ({host}) — доступен")
+                print(f"  ✅ {name} — доступен")
                 return True
         except (subprocess.TimeoutExpired, Exception):
-            print(f"  ❌ {name} ({host}) — недоступен")
             continue
     
-    print("❌ Нет интернет-соединения! Установка пакетов невозможна.")
+    print("❌ Нет интернет-соединения!")
     return False
 
 
@@ -121,7 +102,7 @@ def parse_args(args):
             options["only_samba"] = True
         elif arg == "--skip-update":
             options["skip_update"] = True
-        elif arg == "--help" or arg == "-h":
+        elif arg in ("--help", "-h"):
             print(__doc__)
             sys.exit(0)
     
@@ -146,12 +127,10 @@ class AutoSetupMaster:
         """Проверяет системные требования"""
         print("🔍 Проверка системных требований...")
         
-        # Проверяем права root
         if os.geteuid() != 0:
             print("❌ Этот скрипт требует прав суперпользователя. Запустите с sudo.")
             sys.exit(1)
             
-        # Получаем имя пользователя
         self.username = os.getenv("SUDO_USER")
         if not self.username:
             print("❌ Не удалось определить пользователя. Запустите скрипт через sudo.")
@@ -160,11 +139,8 @@ class AutoSetupMaster:
         print(f"✅ Пользователь: {self.username}")
         self.log(f"Пользователь: {self.username}")
         
-        # Проверяем наличие необходимых файлов
         code_dir = Path(__file__).parent / "code"
-        required_files = ["install.py", "samba_auto_setup.py"]
-        
-        for file in required_files:
+        for file in ["install.py", "samba_auto_setup.py"]:
             if not (code_dir / file).exists():
                 print(f"❌ Не найден файл: {code_dir / file}")
                 sys.exit(1)
@@ -186,83 +162,62 @@ class AutoSetupMaster:
         except Exception as e:
             elapsed = time.time() - start
             self.step_times[name] = elapsed
-            self.log(f"Ошибка в шаге '{name}' через {format_duration(elapsed)}: {e}", level="error")
+            self.log(f"Ошибка в шаге '{name}': {e}", level="error")
             print(f"❌ Ошибка: {e}")
             return False
 
-    def step_0_update_system(self):
-        """Шаг 0: Обновление системы (pacman -Syu)"""
+    def step_1_setup_paru(self):
+        """Шаг 1: Проверка и установка paru"""
         print("\n" + "="*60)
-        print("🔄 ШАГ 0: ОБНОВЛЕНИЕ СИСТЕМЫ")
+        print("🔧 ШАГ 1: ПРОВЕРКА PARU")
         print("="*60)
         
         try:
-            update_packages()
+            if is_paru_installed():
+                print("✅ paru уже установлен")
+                return True
+            
+            print("📦 paru не найден. Устанавливаем...")
+            install_paru(self.username)
+            print("✅ paru успешно установлен!")
+            return True
+            
+        except Exception as e:
+            print(f"\n❌ Ошибка при установке paru: {e}")
+            return False
+
+    def step_2_update_system(self):
+        """Шаг 2: Обновление системы через paru"""
+        print("\n" + "="*60)
+        print("� ШАГ 2: ОБНОВЛЕНИЕ СИСТЕМЫ")
+        print("="*60)
+        
+        try:
+            update_system(self.username)
             print("✅ Система обновлена!")
             return True
         except Exception as e:
             print(f"\n❌ Ошибка при обновлении: {e}")
             return False
 
-    def step_1_install_yay(self):
-        """Шаг 1: Проверка и установка yay"""
+    def step_3_install_packages(self):
+        """Шаг 3: Установка всех пакетов через paru"""
         print("\n" + "="*60)
-        print("🔧 ШАГ 1: ПРОВЕРКА И УСТАНОВКА YAY")
+        print("📦 ШАГ 3: УСТАНОВКА ПАКЕТОВ")
         print("="*60)
         
         try:
-            if is_yay_installed():
-                print("✅ yay уже установлен")
-                return True
-            
-            print("📦 yay не найден. Устанавливаем...")
-            install_dependencies()
-            clone_and_build_yay(self.username)
-            print("✅ yay успешно установлен!")
-            return True
-            
-        except Exception as e:
-            print(f"\n❌ Ошибка при установке yay: {e}")
-            return False
-
-    def step_2_install_yay_packages(self):
-        """Шаг 2: Установка пакетов через yay"""
-        print("\n" + "="*60)
-        print("📱 ШАГ 2: УСТАНОВКА ПАКЕТОВ ЧЕРЕЗ YAY")
-        print("="*60)
-        
-        try:
-            if not YAY_PACKAGES:
-                print("ℹ️  Список пакетов yay пуст, пропускаем")
+            if not PACKAGES:
+                print("ℹ️  Список пакетов пуст, пропускаем")
                 return True
                 
-            print(f"Всего в списке: {len(YAY_PACKAGES)} пакетов")
-            install_packages_with_yay(self.username, YAY_PACKAGES)
-            print("\n✅ Установка пакетов yay завершена!")
+            print(f"Всего в списке: {len(PACKAGES)} пакетов")
+            install_packages(self.username, PACKAGES)
+            print("\n✅ Установка пакетов завершена!")
             return True
             
         except Exception as e:
-            print(f"\n❌ Ошибка при установке пакетов yay: {e}")
-            return False
-
-    def step_3_install_pacman_packages(self):
-        """Шаг 3: Установка пакетов через pacman"""
-        print("\n" + "="*60)
-        print("📦 ШАГ 3: УСТАНОВКА ПАКЕТОВ ЧЕРЕЗ PACMAN")
-        print("="*60)
-        
-        try:
-            if not PACMAN_PACKAGES:
-                print("ℹ️  Список пакетов pacman пуст, пропускаем")
-                return True
-                
-            print(f"Всего в списке: {len(PACMAN_PACKAGES)} пакетов")
-            install_packages_with_pacman(PACMAN_PACKAGES)
-            print("✅ Пакеты через pacman успешно установлены!")
-            return True
-            
-        except Exception as e:
-            print(f"\n❌ Ошибка при установке пакетов pacman: {e}")
+            print(f"\n❌ Ошибка при установке пакетов: {e}")
             return False
 
     def step_4_setup_samba(self):
@@ -298,18 +253,18 @@ class AutoSetupMaster:
                     result = step_func()
                     if result is False:
                         failed_steps.append(step_name)
-                        print(f"❌ Шаг '{step_name}' завершился с ошибкой")
+                        print(f"❌ {step_name} — ошибка")
                     else:
-                        print(f"✅ Шаг '{step_name}' выполнен успешно")
+                        print(f"✅ {step_name} — OK")
                 except Exception as e:
-                    print(f"❌ Критическая ошибка в шаге '{step_name}': {e}")
+                    print(f"❌ Критическая ошибка: {step_name}: {e}")
                     failed_steps.append(step_name)
 
             if not failed_steps:
                 print("\n🎉 Настройка Samba завершена успешно!")
                 return True
             else:
-                print(f"\n⚠️  Настройка Samba завершена с ошибками в {len(failed_steps)} шагах:")
+                print(f"\n⚠️  Ошибки в {len(failed_steps)} шагах:")
                 for step in failed_steps:
                     print(f"  ❌ {step}")
                 return False
@@ -330,24 +285,20 @@ class AutoSetupMaster:
             total += elapsed
         print(f"  ─────────────────────────")
         print(f"  🕐 Общее время: {format_duration(total)}")
-        self.log(f"Общее время выполнения: {format_duration(total)}")
+        self.log(f"Общее время: {format_duration(total)}")
 
     def run_full_setup(self, options=None):
         """Запускает полную автоматическую настройку системы"""
         if options is None:
             options = {}
         
-        total_start = time.time()
-        
         # Настраиваем логирование
         self.logger, self.log_file = setup_logging()
-        self.log("=" * 40)
         self.log("Начало автоматической настройки системы")
         
         print("🌟 АВТОМАТИЧЕСКАЯ НАСТРОЙКА СИСТЕМЫ")
         print("="*60)
         
-        # Определяем какие шаги выполнять
         only_packages = options.get("only_packages", False)
         only_samba = options.get("only_samba", False)
         skip_update = options.get("skip_update", False)
@@ -359,29 +310,25 @@ class AutoSetupMaster:
         else:
             print("📋 Режим: полная установка")
         
-        if skip_update:
-            print("⏭️  Обновление системы пропущено (--skip-update)")
-        
         print("="*60)
         
         # Проверяем требования
         self.check_requirements()
         
-        # Проверяем интернет (только если будем ставить пакеты)
+        # Проверяем интернет (если будем ставить пакеты)
         if not only_samba:
             if not check_internet():
-                self.log("Нет интернет-соединения, прервано", level="error")
+                self.log("Нет интернет-соединения", level="error")
                 return False
 
         # Формируем список шагов
         steps = []
         
         if not only_samba:
+            steps.append(("Проверка paru", self.step_1_setup_paru))
             if not skip_update:
-                steps.append(("Обновление системы", self.step_0_update_system))
-            steps.append(("Установка yay", self.step_1_install_yay))
-            steps.append(("Пакеты yay", self.step_2_install_yay_packages))
-            steps.append(("Пакеты pacman", self.step_3_install_pacman_packages))
+                steps.append(("Обновление системы", self.step_2_update_system))
+            steps.append(("Установка пакетов", self.step_3_install_packages))
         
         if not only_packages:
             steps.append(("Настройка Samba", self.step_4_setup_samba))
@@ -393,15 +340,14 @@ class AutoSetupMaster:
             if self.run_step(step_name, step_func):
                 success_steps += 1
             else:
-                print(f"⚠️  Продолжаем несмотря на ошибки в шаге '{step_name}'...")
-                self.log(f"Ошибка в шаге '{step_name}', продолжаем", level="warning")
+                print(f"⚠️  Продолжаем несмотря на ошибки в '{step_name}'...")
+                self.log(f"Ошибка в '{step_name}', продолжаем", level="warning")
             
         # Финальные итоги
         print("\n" + "="*60)
         print("🏁 ИТОГИ АВТОМАТИЧЕСКОЙ НАСТРОЙКИ")
         print("="*60)
         
-        # Отчёт по времени
         self.print_time_report()
         
         if success_steps == total_steps:
@@ -409,7 +355,7 @@ class AutoSetupMaster:
             self.log("Все шаги выполнены успешно")
             
             if not only_packages:
-                print("\n🌐 Ваш Samba сервер готов к использованию!")
+                print("\n🌐 Samba сервер готов к использованию!")
                 print("📂 Доступные общие папки:")
                 print("  • shared - /home/boss/Загрузки/")
                 print("  • games - /mnt/aee8e7a9-5710-4dbb-bb8e-982c833a085f")  
@@ -417,7 +363,6 @@ class AutoSetupMaster:
             
         elif success_steps > 0:
             print(f"\n⚠️  ЧАСТИЧНЫЙ УСПЕХ ({success_steps}/{total_steps} шагов)")
-            print("Некоторые шаги выполнены, но есть ошибки.")
             self.log(f"Частичный успех: {success_steps}/{total_steps}")
             
         else:
@@ -425,9 +370,8 @@ class AutoSetupMaster:
             self.log("Настройка завершилась с ошибками", level="error")
             
         print(f"\n📄 Полный лог: {self.log_file}")
-        print("Процесс автоматизации завершён.")
-        
         return success_steps == total_steps
+
 
 def main():
     """Главная функция"""

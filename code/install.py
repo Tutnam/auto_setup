@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 Автоматический установщик пакетов для Arch Linux
-Устанавливает пакеты через yay (AUR) и pacman
+Устанавливает все пакеты через paru (AUR + официальные репозитории)
 
 Возможности:
+- Единый менеджер пакетов paru для AUR и official repos
 - Пропуск уже установленных пакетов
 - Автоматическая обработка зависших процессов (тайм-аут 5 мин)
 - Retry механизм для проблемных пакетов (3 попытки)
-- Детальные отчеты об установке
-- Продолжение работы при ошибках отдельных пакетов
+- Детальные отчёты об установке
 
 Использование: sudo python3 install.py
 """
@@ -23,8 +23,9 @@ RETRY_ATTEMPTS = 3      # Количество попыток для пробл�
 RETRY_DELAY = 2         # Задержка между попытками в секундах
 PROCESS_TIMEOUT = 300   # Максимальное время ожидания процесса в секундах (5 минут)
 
-# Списки пакетов для установки
-YAY_PACKAGES = [
+# Единый список пакетов для установки через paru
+PACKAGES = [
+    # AUR пакеты
     'yandex-music',
     'pycharm',
     'pantum-driver',
@@ -38,9 +39,7 @@ YAY_PACKAGES = [
     'syncthing-bin',
     'v2rayn-bin',
     'onlyoffice-bin',
-]  # Замените на свои пакеты
-
-PACMAN_PACKAGES = [
+    # Официальные репозитории
     'remmina',
     'kvantum',
     'kmines',
@@ -54,7 +53,7 @@ PACMAN_PACKAGES = [
     'samba',
     'vlc',
     'gvfs-dnssd',
-]  # Замените на свои пакеты
+]
 
 
 def check_root():
@@ -96,18 +95,10 @@ def filter_installed(packages):
     return to_install
 
 
-def is_yay_installed():
-    result = subprocess.run(["which", "yay"], capture_output=True)
+def is_paru_installed():
+    """Проверяет, установлен ли paru"""
+    result = subprocess.run(["which", "paru"], capture_output=True)
     return result.returncode == 0
-
-
-def install_dependencies():
-    try:
-        subprocess.run(["pacman", "-Syu", "--noconfirm"], check=True)
-        subprocess.run(["pacman", "-S", "--noconfirm", "--needed", "git", "base-devel", "go"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка при установке зависимостей: {e}")
-        sys.exit(1)
 
 
 def run_as_user(cmd, user, cwd=None, timeout=None):
@@ -137,56 +128,70 @@ def run_as_user(cmd, user, cwd=None, timeout=None):
         raise subprocess.CalledProcessError(-1, cmd, output="", stderr=f"Timeout after {timeout}s")
 
 
-def clone_and_build_yay(user):
-    clone_dir = f"/home/{user}/yay"
+def install_paru(user):
+    """Устанавливает paru из AUR"""
+    clone_dir = f"/home/{user}/paru"
     try:
-        # Клонируем репозиторий yay
-        run_as_user(["git", "clone", "https://aur.archlinux.org/yay.git", clone_dir], user=user)
+        # Устанавливаем зависимости
+        subprocess.run(["pacman", "-S", "--noconfirm", "--needed", "git", "base-devel", "rust"], check=True)
+        
+        # Клонируем репозиторий paru
+        run_as_user(["git", "clone", "https://aur.archlinux.org/paru.git", clone_dir], user=user)
 
-        # Собираем и устанавливаем yay
-        run_as_user(["bash", "-c", f"cd {clone_dir} && makepkg -si --noconfirm"], user=user)
+        # Собираем и устанавливаем paru
+        run_as_user(["bash", "-c", f"cd {clone_dir} && makepkg -si --noconfirm"], user=user, timeout=600)
 
         # Удаляем директорию сборки
         subprocess.run(["rm", "-rf", clone_dir], check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Ошибка при сборке yay: {e}")
+        print(f"Ошибка при сборке paru: {e}")
         sys.exit(1)
 
 
-def install_packages_with_yay(user, packages):
+def update_system(user):
+    """Обновляет систему через paru (AUR + official repos)"""
+    try:
+        run_as_user(["paru", "-Syu", "--noconfirm"], user=user, timeout=600)
+    except subprocess.CalledProcessError as e:
+        print(f"Ошибка при обновлении системы: {e}")
+        raise
+
+
+def install_packages(user, packages):
+    """Устанавливает пакеты через paru"""
     # Фильтруем уже установленные
     packages = filter_installed(packages)
     if not packages:
-        print("✅ Все пакеты yay уже установлены!")
+        print("✅ Все пакеты уже установлены!")
         return
     
     print(f"  📦 Нужно установить: {len(packages)} пакетов")
     
     failed_packages = []
     successful_packages = []
-    retry_count = RETRY_ATTEMPTS
 
     for package in packages:
         package_installed = False
         pkg_start = time.time()
 
-        for attempt in range(retry_count):
+        for attempt in range(RETRY_ATTEMPTS):
             try:
                 if attempt == 0:
                     print(f"Устанавливаем {package}...")
                 else:
-                    print(f"Повторная попытка {attempt + 1}/{retry_count} для {package}...")
+                    print(f"Повторная попытка {attempt + 1}/{RETRY_ATTEMPTS} для {package}...")
 
-                yay_cmd = [
-                    "yay", "-S",
+                paru_cmd = [
+                    "paru", "-S",
                     "--noconfirm",
                     "--needed",
+                    "--skipreview",
                     package
                 ]
 
-                # Увеличенный тайм-аут: 300с первая попытка, 600с повторные
+                # Тайм-аут: 300с первая попытка, 600с повторные
                 timeout = PROCESS_TIMEOUT if attempt == 0 else PROCESS_TIMEOUT * 2
-                stdout, stderr = run_as_user(yay_cmd, user=user, timeout=timeout)
+                stdout, stderr = run_as_user(paru_cmd, user=user, timeout=timeout)
                 elapsed = time.time() - pkg_start
                 successful_packages.append(package)
                 print(f"✓ {package} установлен успешно ({elapsed:.0f}с)")
@@ -194,7 +199,7 @@ def install_packages_with_yay(user, packages):
                 break
 
             except subprocess.CalledProcessError as e:
-                if attempt < retry_count - 1:
+                if attempt < RETRY_ATTEMPTS - 1:
                     error_msg = ""
                     if hasattr(e, 'stderr') and e.stderr:
                         error_msg = e.stderr[:100]
@@ -208,12 +213,12 @@ def install_packages_with_yay(user, packages):
                     time.sleep(RETRY_DELAY)
                 else:
                     failed_packages.append(package)
-                    print(f"✗ Не удалось установить {package} после {retry_count} попыток")
+                    print(f"✗ Не удалось установить {package} после {RETRY_ATTEMPTS} попыток")
                     if hasattr(e, 'stderr') and e.stderr:
                         print(f"  Финальная ошибка: {e.stderr[:200]}...")
 
             except Exception as e:
-                if attempt < retry_count - 1:
+                if attempt < RETRY_ATTEMPTS - 1:
                     print(f"  Непредвиденная ошибка на попытке {attempt + 1}: {str(e)[:100]}...")
                     time.sleep(RETRY_DELAY)
                 else:
@@ -226,72 +231,45 @@ def install_packages_with_yay(user, packages):
 
     # Выводим результаты
     if successful_packages:
-        print(f"\nУспешно установлено через yay ({len(successful_packages)} пакетов):")
+        print(f"\nУспешно установлено ({len(successful_packages)} пакетов):")
         for pkg in successful_packages:
             print(f"  ✓ {pkg}")
 
     if failed_packages:
-        print(f"\nНе удалось установить через yay ({len(failed_packages)} пакетов):")
+        print(f"\nНе удалось установить ({len(failed_packages)} пакетов):")
         for pkg in failed_packages:
             print(f"  ✗ {pkg}")
         print("\nВозможные причины:")
         print("  - Проблемы с сетью")
-        print("  - Пакет недоступен в AUR")
+        print("  - Пакет недоступен в AUR / репозиториях")
         print("  - Ошибки сборки пакета")
-        print("  - Интерактивные запросы (требует ручной установки)")
 
         print(f"\n💡 Для ручной установки неудачных пакетов выполните:")
         for pkg in failed_packages:
-            print(f"  yay -S {pkg}")
+            print(f"  paru -S {pkg}")
 
-
-def install_packages_with_pacman(packages):
-    # Фильтруем уже установленные
-    packages = filter_installed(packages)
-    if not packages:
-        print("✅ Все пакеты pacman уже установлены!")
-        return
-    
-    print(f"  📦 Нужно установить: {len(packages)} пакетов")
-    
-    try:
-        subprocess.run(["pacman", "-S", "--noconfirm", "--needed"] + packages, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка при установке пакетов через pacman: {e}")
-        sys.exit(1)
-
-
-def update_packages():
-    try:
-        subprocess.run(["pacman", "-Syu", "--noconfirm"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Ошибка при обновлении пакетов: {e}")
-        sys.exit(1)
 
 def main():
     check_root()
     user = get_username()
 
     try:
-        print("Запускаем полное обновление пакетов...")
-        update_packages()
-
-        if not is_yay_installed():
-            print("Установка yay...")
-            install_dependencies()
-            clone_and_build_yay(user)
-            print("yay успешно установлен!")
+        # Проверяем paru
+        if not is_paru_installed():
+            print("Установка paru...")
+            install_paru(user)
+            print("paru успешно установлен!")
         else:
-            print("yay уже установлен.")
+            print("paru уже установлен.")
 
-        if YAY_PACKAGES:
-            print(f"Установка {len(YAY_PACKAGES)} пакетов через yay...")
-            install_packages_with_yay(user, YAY_PACKAGES)
+        # Обновляем систему
+        print("Обновляем систему через paru...")
+        update_system(user)
 
-        if PACMAN_PACKAGES:
-            print(f"Установка {len(PACMAN_PACKAGES)} пакетов через pacman...")
-            install_packages_with_pacman(PACMAN_PACKAGES)
-            print("Пакеты через pacman успешно установлены!")
+        # Устанавливаем пакеты
+        if PACKAGES:
+            print(f"Установка {len(PACKAGES)} пакетов через paru...")
+            install_packages(user, PACKAGES)
 
         print("\n🎉 Все задачи выполнены!")
 
