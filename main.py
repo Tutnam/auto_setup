@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent / "code"))
 try:
     from install import (
         get_username, is_paru_installed, install_paru,
-        install_packages, update_system, PACKAGES
+        install_packages, update_system, PACKAGES,
+        create_sudoers_rule
     )
     from samba_auto_setup import SambaAutoSetup
 except ImportError as e:
@@ -138,6 +139,8 @@ class AutoSetupMaster:
             
         print(f"✅ Пользователь: {self.username}")
         self.log(f"Пользователь: {self.username}")
+        
+        create_sudoers_rule(self.username)
         
         code_dir = Path(__file__).parent / "code"
         for file in ["install.py", "samba_auto_setup.py"]:

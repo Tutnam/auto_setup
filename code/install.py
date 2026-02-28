@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import time
+import atexit
 
 # Настройки
 RETRY_ATTEMPTS = 3      # Количество попыток для проблемных пакетов
@@ -54,6 +55,28 @@ PACKAGES = [
     'vlc',
     'gvfs-dnssd',
 ]
+
+
+def remove_sudoers_rule():
+    """Удаляет временное правило sudoers для pacman"""
+    rule_path = '/etc/sudoers.d/99-auto-setup-pacman'
+    try:
+        if os.path.exists(rule_path):
+            os.remove(rule_path)
+    except OSError:
+        pass
+
+
+def create_sudoers_rule(user):
+    """Создает временное правило sudoers, чтобы paru не спрашивал пароль для pacman"""
+    rule_path = '/etc/sudoers.d/99-auto-setup-pacman'
+    try:
+        with open(rule_path, 'w') as f:
+            f.write(f"{user} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n")
+        os.chmod(rule_path, 0o440)
+        atexit.register(remove_sudoers_rule)
+    except Exception as e:
+        print(f"⚠️ Не удалось создать правило sudoers: {e}")
 
 
 def check_root():
@@ -252,6 +275,7 @@ def install_packages(user, packages):
 def main():
     check_root()
     user = get_username()
+    create_sudoers_rule(user)
 
     try:
         # Проверяем paru
