@@ -338,6 +338,37 @@ update_packages = update_system
 install_packages = install_packages_with_paru
 
 
+def remove_sudoers_rule() -> None:
+    """Удаляет временное правило sudoers для pacman (обратная совместимость)."""
+    for rule_name in ("99-auto-setup-paru", "99-auto-setup-pacman"):
+        rule_path = Path("/etc/sudoers.d") / rule_name
+        try:
+            if rule_path.exists():
+                rule_path.unlink()
+        except OSError:
+            pass
+
+
+def create_sudoers_rule(user: str) -> None:
+    """Создает временное правило sudoers для pacman (обратная совместимость)."""
+    rule_path = Path("/etc/sudoers.d/99-auto-setup-paru")
+    try:
+        content = f"{user} ALL=(ALL) NOPASSWD: /usr/bin/pacman\n"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(str(rule_path), flags, 0o440)
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        check_res = subprocess.run(["visudo", "-cf", str(rule_path)], capture_output=True, text=True)
+        if check_res.returncode != 0:
+            remove_sudoers_rule()
+            return
+        import atexit
+        atexit.register(remove_sudoers_rule)
+    except Exception as e:
+        print(f"⚠️ Не удалось создать правило sudoers: {e}")
+
+
+
 def main() -> None:
     """Точка входа автономного запуска install.py."""
     check_root()
