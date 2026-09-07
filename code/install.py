@@ -332,8 +332,10 @@ def update_system() -> None:
         sys.exit(1)
 
 
-# Алиас для обратной совместимости
+# Алиасы для обратной совместимости
+PACKAGES = PARU_PACKAGES
 update_packages = update_system
+install_packages = install_packages_with_paru
 
 
 def main() -> None:
