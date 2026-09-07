@@ -2,94 +2,64 @@
 # -*- coding: utf-8 -*-
 """
 Автоматический скрипт настройки Samba сервера
-Автоматизирует все действия из файла samba.py
+Запускается с правами root через pkexec или sudo.
 """
 
 import subprocess
 import getpass
 import sys
 import os
+import pwd
 import time
 from pathlib import Path
 
-class SambaAutoSetup:
-    def __init__(self):
-        self.sudo_password = None
-        self.username = None
-        
-    def get_sudo_password(self):
-        """Запрашивает пароль root один раз в начале (только если пароль не установлен)"""
-        if self.sudo_password is not None:
-            print("✅ Используется предварительно введённый пароль sudo")
-            return
-            
-        print("🔐 Для настройки Samba требуются права root")
-        self.sudo_password = getpass.getpass("Введите пароль sudo: ")
-        
-        # Проверяем валидность пароля
-        try:
-            result = self.run_sudo_command("whoami")
-            if result.returncode != 0:
-                print("❌ Неверный пароль!")
-                sys.exit(1)
-            print("✅ Пароль принят")
-        except Exception as e:
-            print(f"❌ Ошибка проверки пароля: {e}")
-            sys.exit(1)
+# Импортируем утилиты проверки root и пользователя
+try:
+    from install import check_root, get_username
+except ImportError:
+    from code.install import check_root, get_username
 
-    def run_sudo_command(self, command, input_text=None):
-        """Выполняет команду с sudo, используя сохранённый пароль"""
-        if isinstance(command, str):
-            cmd = ["sudo", "-S"] + command.split()
-        else:
-            cmd = ["sudo", "-S"] + command
-            
+
+class SambaAutoSetup:
+    def __init__(self, username: str | None = None):
+        self.username = username
+
+    def run_command(self, command, input_text: str | None = None):
+        """Выполняет команду напрямую от root."""
+        cmd = command.split() if isinstance(command, str) else command
         try:
-            if input_text:
-                full_input = f"{self.sudo_password}\n{input_text}"
-            else:
-                full_input = f"{self.sudo_password}\n"
-                
             result = subprocess.run(
                 cmd,
-                input=full_input,
-                text=True,
+                input=input_text,
                 capture_output=True,
+                text=True,
                 timeout=30
             )
             return result
         except subprocess.TimeoutExpired:
-            print(f"⏰ Команда {' '.join(cmd)} превысила время ожидания")
+            cmd_str = ' '.join(cmd) if isinstance(cmd, list) else str(cmd)
+            print(f"⏰ Команда {cmd_str} превысила время ожидания")
             return None
         except Exception as e:
-            print(f"❌ Ошибка выполнения команды {' '.join(cmd)}: {e}")
+            cmd_str = ' '.join(cmd) if isinstance(cmd, list) else str(cmd)
+            print(f"❌ Ошибка выполнения команды {cmd_str}: {e}")
             return None
 
-    def run_command(self, command):
-        """Выполняет обычную команду без sudo"""
-        try:
-            result = subprocess.run(
-                command.split() if isinstance(command, str) else command,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            return result
-        except Exception as e:
-            print(f"❌ Ошибка выполнения команды {command}: {e}")
-            return None
+    def run_sudo_command(self, command, input_text: str | None = None):
+        """Выполняет привилегированную команду напрямую от root (обратная совместимость)."""
+        return self.run_command(command, input_text=input_text)
 
     def step_1_set_permissions(self):
         """Шаг 1: Устанавливаем права на директорию samba usershares"""
         print("\n📁 Шаг 1: Настройка прав доступа...")
         
         # Создаём директорию если не существует
-        result = self.run_sudo_command("mkdir -p /var/lib/samba/usershares")
+        result = self.run_command("mkdir -p /var/lib/samba/usershares")
         if result and result.returncode == 0:
             print("✅ Директория /var/lib/samba/usershares создана")
         
         # Устанавливаем права
-        result = self.run_sudo_command("chmod 1770 /var/lib/samba/usershares")
+        result = self.run_command("chmod 1770 /var/lib/samba/usershares")
         if result and result.returncode == 0:
             print("✅ Права 1770 установлены для /var/lib/samba/usershares")
         else:
@@ -101,17 +71,21 @@ class SambaAutoSetup:
         """Шаг 2: Настройка конфигурационного файла smb.conf"""
         print("\n⚙️  Шаг 2: Настройка smb.conf...")
         
-        # Создаём резервную копию
-        result = self.run_sudo_command("cp /etc/samba/smb.conf /etc/samba/smb.conf.backup")
-        if result and result.returncode == 0:
-            print("✅ Резервная копия smb.conf создана")
-
-        # Конфигурация Samba
         # Получаем имя пользователя для guest account и пути
-        username = os.getenv("SUDO_USER") or os.getenv("USER", "boss")
-        home_dir = os.path.expanduser(f"~{username}") if username != "root" else f"/home/{username}"
+        username = self.username or get_username()
+        try:
+            user_info = pwd.getpwnam(username)
+            home_dir = user_info.pw_dir
+        except KeyError:
+            home_dir = f"/home/{username}"
         downloads_path = f"{home_dir}/Загрузки"
         
+        # Создаём резервную копию
+        if os.path.exists("/etc/samba/smb.conf"):
+            result = self.run_command("cp /etc/samba/smb.conf /etc/samba/smb.conf.backup")
+            if result and result.returncode == 0:
+                print("✅ Резервная копия smb.conf создана")
+
         smb_config = f"""
 [global]
     workgroup = WORKGROUP
@@ -171,30 +145,31 @@ class SambaAutoSetup:
     force directory mode = 0775
 """
 
-        # Записываем конфигурацию
+        # Безопасная атомарная запись конфигурации
+        tmp_config_path = "/etc/samba/smb.conf.tmp"
+        target_config_path = "/etc/samba/smb.conf"
         try:
-            with open("/tmp/smb_config.tmp", "w", encoding="utf-8") as f:
+            os.makedirs("/etc/samba", exist_ok=True)
+            with open(tmp_config_path, "w", encoding="utf-8") as f:
                 f.write(smb_config)
-            
-            result = self.run_sudo_command("cp /tmp/smb_config.tmp /etc/samba/smb.conf")
-            if result and result.returncode == 0:
-                print("✅ Конфигурация smb.conf обновлена")
-                # Удаляем временный файл
-                os.remove("/tmp/smb_config.tmp")
-                return True
-            else:
-                print("❌ Ошибка обновления smb.conf")
-                return False
+            os.chmod(tmp_config_path, 0o644)
+            os.replace(tmp_config_path, target_config_path)
+            print("✅ Конфигурация smb.conf обновлена")
+            return True
         except Exception as e:
-            print(f"❌ Ошибка создания конфигурации: {e}")
+            if os.path.exists(tmp_config_path):
+                try:
+                    os.remove(tmp_config_path)
+                except OSError:
+                    pass
+            print(f"❌ Ошибка создания конфигурации smb.conf: {e}")
             return False
 
     def step_3_add_samba_user(self):
         """Шаг 3: Добавление пользователя в Samba"""
         print("\n👤 Шаг 3: Добавление пользователя в Samba...")
         
-        # Получаем имя реального пользователя (не root, если запущено через sudo)
-        current_user = os.getenv("SUDO_USER") or os.getenv("USER", "boss")
+        current_user = self.username or get_username()
         
         # Проверяем переменную окружения для пароля Samba
         env_samba_password = os.getenv("SAMBA_PASSWORD") or os.getenv("AUTO_SETUP_SAMBA_PASSWORD")
@@ -203,19 +178,18 @@ class SambaAutoSetup:
             samba_password = env_samba_password
             print(f"Добавляем пользователя '{current_user}' в Samba (пароль из переменной окружения)")
         else:
-            # Запрашиваем пароль для Samba
             print(f"Добавляем пользователя '{current_user}' в Samba")
             samba_password = getpass.getpass(f"Введите пароль для Samba пользователя {current_user}: ")
         
-        # Добавляем пользователя
-        result = self.run_sudo_command(f"smbpasswd -a {current_user}", input_text=f"{samba_password}\n{samba_password}\n")
+        # Добавляем пользователя без sudo-пароля
+        result = self.run_command(f"smbpasswd -a {current_user}", input_text=f"{samba_password}\n{samba_password}\n")
         
         if result and result.returncode == 0:
             print(f"✅ Пользователь {current_user} добавлен в Samba")
             return True
         else:
             print(f"❌ Ошибка добавления пользователя {current_user}")
-            if result:
+            if result and result.stderr:
                 print(f"Вывод ошибки: {result.stderr}")
             return False
 
@@ -228,19 +202,19 @@ class SambaAutoSetup:
         
         for service in services:
             # Включаем автозапуск
-            result = self.run_sudo_command(f"systemctl enable {service}")
+            result = self.run_command(f"systemctl enable {service}")
             if result and result.returncode == 0:
                 print(f"✅ Автозапуск службы {service} включён")
             
             # Запускаем службу
-            result = self.run_sudo_command(f"systemctl start {service}")
+            result = self.run_command(f"systemctl start {service}")
             if result and result.returncode == 0:
                 print(f"✅ Служба {service} запущена")
             else:
                 print(f"❌ Ошибка запуска службы {service}")
                 
             # Перезапускаем для применения настроек
-            result = self.run_sudo_command(f"systemctl restart {service}")
+            result = self.run_command(f"systemctl restart {service}")
             if result and result.returncode == 0:
                 print(f"✅ Служба {service} перезапущена")
             else:
@@ -381,7 +355,7 @@ class SambaAutoSetup:
                 
                 success_count = 0
                 for rule, description in samba_rules:
-                    result = self.run_sudo_command(rule)
+                    result = self.run_command(rule)
                     if result and result.returncode == 0:
                         print(f"✅ Правило добавлено: {rule}")
                         success_count += 1
@@ -408,8 +382,12 @@ class SambaAutoSetup:
         print("\n📁 Создание директорий...")
         
         # Получаем имя реального пользователя
-        username = os.getenv("SUDO_USER") or os.getenv("USER", "boss")
-        home_dir = os.path.expanduser(f"~{username}") if username != "root" else f"/home/{username}"
+        username = self.username or get_username()
+        try:
+            user_info = pwd.getpwnam(username)
+            home_dir = user_info.pw_dir
+        except KeyError:
+            home_dir = f"/home/{username}"
         
         directories = [
             f"{home_dir}/Загрузки",
@@ -420,13 +398,13 @@ class SambaAutoSetup:
         for directory in directories:
             if not os.path.exists(directory):
                 try:
-                    result = self.run_sudo_command(f"mkdir -p {directory}")
+                    result = self.run_command(f"mkdir -p {directory}")
                     if result and result.returncode == 0:
                         print(f"✅ Директория {directory} создана")
                         
                         # Устанавливаем права только для домашних директорий
                         if directory.startswith(home_dir) or directory.startswith("/home/"):
-                            result = self.run_sudo_command(f"chown {username}:{username} {directory}")
+                            result = self.run_command(f"chown {username}:{username} {directory}")
                             if result and result.returncode == 0:
                                 print(f"✅ Права для {directory} установлены")
                                 success_count += 1
@@ -446,11 +424,13 @@ class SambaAutoSetup:
 
     def run_setup(self):
         """Запускает полную настройку Samba"""
+        check_root()
+        if not self.username:
+            self.username = get_username()
+
         print("🚀 Автоматическая настройка Samba сервера")
         print("=" * 50)
-        
-        # Получаем пароль root
-        self.get_sudo_password()
+        print(f"👤 Пользователь: {self.username}")
         
         # Создаём директории
         if not self.create_directories():

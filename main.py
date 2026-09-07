@@ -6,27 +6,17 @@
 1. Установка необходимых пакетов (install.py)
 2. Настройка Samba сервера (samba_auto_setup.py)
 
-Пароль root запрашивается только один раз в начале!
-
-Использование:
+Запускается с правами root через pkexec или sudo:
+    pkexec python3 main.py
+    # или
     sudo python3 main.py
-    
-Или с переменными окружения для автоматизации:
-    export SUDO_PASSWORD="your_password"
-    export SAMBA_PASSWORD="your_samba_password"
-    sudo -E python3 main.py
 
 Поддерживаемые переменные окружения:
-    SUDO_PASSWORD или AUTO_SETUP_PASSWORD - для sudo пароля
-    SAMBA_PASSWORD или AUTO_SETUP_SAMBA_PASSWORD - для пароля Samba пользователя
+    SAMBA_PASSWORD или AUTO_SETUP_SAMBA_PASSWORD - для пароля Samba пользователя (опционально)
 """
 
 import os
 import sys
-import getpass
-import subprocess
-import tempfile
-import stat
 from pathlib import Path
 
 # Добавляем папку code в путь для импорта модулей
@@ -35,11 +25,14 @@ sys.path.insert(0, str(Path(__file__).parent / "code"))
 try:
     # Импортируем наши модули
     from install import (
-        get_password, create_askpass_script, remove_askpass_script,
-        run_with_password, get_username, is_yay_installed,
-        install_dependencies, clone_and_build_yay, 
-        install_packages_with_yay, install_packages_with_pacman,
-        update_packages, YAY_PACKAGES, PACMAN_PACKAGES
+        check_root,
+        get_username,
+        is_paru_installed,
+        install_dependencies,
+        install_paru,
+        install_packages_with_paru,
+        update_system,
+        PARU_PACKAGES,
     )
     from samba_auto_setup import SambaAutoSetup
 except ImportError as e:
@@ -51,125 +44,73 @@ class AutoSetupMaster:
     """Главный класс для координации автоматической настройки системы"""
     
     def __init__(self):
-        self.sudo_password = None
-        self.askpass_script = None
         self.username = None
-        
+
     def check_requirements(self):
         """Проверяет системные требования"""
         print("🔍 Проверка системных требований...")
-        
+
         # Проверяем права root
-        if os.geteuid() != 0:
-            print("❌ Этот скрипт требует прав суперпользователя. Запустите с sudo.")
-            sys.exit(1)
-            
+        check_root()
+
         # Получаем имя пользователя
-        self.username = os.getenv("SUDO_USER")
-        if not self.username:
-            print("❌ Не удалось определить пользователя. Запустите скрипт через sudo.")
-            sys.exit(1)
-            
+        self.username = get_username()
         print(f"✅ Пользователь: {self.username}")
-        
+
         # Проверяем наличие необходимых файлов
         code_dir = Path(__file__).parent / "code"
         required_files = ["install.py", "samba_auto_setup.py"]
-        
+
         for file in required_files:
             if not (code_dir / file).exists():
                 print(f"❌ Не найден файл: {code_dir / file}")
                 sys.exit(1)
-                
-        print("✅ Все необходимые файлы найдены")
 
-    def get_sudo_password(self):
-        """Запрашивает пароль sudo один раз в начале или берёт из переменной окружения"""
-        print("\n🔐 Для автоматической настройки системы требуются права root")
-        print("Пароль будет запрошен только один раз и использован для всех операций:")
-        print("  • Установка пакетов")
-        print("  • Настройка Samba сервера")
-        print("  • Конфигурация системы")
-        
-        # Проверяем переменную окружения для пароля
-        env_password = os.getenv("SUDO_PASSWORD") or os.getenv("AUTO_SETUP_PASSWORD")
-        
-        if env_password:
-            self.sudo_password = env_password
-            print("\n✅ Пароль получен из переменной окружения (SUDO_PASSWORD или AUTO_SETUP_PASSWORD)")
-        else:
-            self.sudo_password = getpass.getpass("\nВведите пароль sudo: ")
-        
-        # Создаём askpass скрипт для автоматической передачи пароля
-        try:
-            self.askpass_script = create_askpass_script(self.sudo_password)
-            
-            # Проверяем валидность пароля
-            run_with_password(["true"], self.sudo_password)
-            print("✅ Пароль принят. Начинаем автоматическую настройку...")
-            return True
-            
-        except subprocess.CalledProcessError:
-            print("❌ Неверный пароль!")
-            sys.exit(1)
-        except Exception as e:
-            print(f"❌ Ошибка при проверке пароля: {e}")
-            sys.exit(1)
+        print("✅ Все необходимые файлы найдены")
 
     def step_1_install_packages(self):
         """Шаг 1: Установка пакетов"""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🚀 ШАГ 1: УСТАНОВКА ПАКЕТОВ")
-        print("="*60)
-        
+        print("=" * 60)
+
         try:
             # Обновляем пакеты
             print("\n📦 Обновление системных пакетов...")
-            update_packages()
+            update_system()
             print("✅ Система обновлена")
-            
-            # Установка yay, если он не установлен
-            if not is_yay_installed():
-                print("\n🔧 Установка yay (AUR helper)...")
+
+            # Установка paru, если он не установлен
+            if not is_paru_installed():
+                print("\n🔧 Установка paru (AUR helper)...")
                 install_dependencies()
-                clone_and_build_yay(self.username, self.askpass_script, self.sudo_password)
-                print("✅ yay успешно установлен!")
+                install_paru(self.username)
+                print("✅ paru успешно установлен!")
             else:
-                print("\n✅ yay уже установлен")
+                print("\n✅ paru уже установлен")
 
-            # Установка пакетов через yay
-            if YAY_PACKAGES:
-                print(f"\n📱 Установка {len(YAY_PACKAGES)} пакетов через yay (AUR)...")
+            # Установка пакетов через paru
+            if PARU_PACKAGES:
+                print(f"\n📱 Установка {len(PARU_PACKAGES)} пакетов через paru...")
                 print("⚠️  Некоторые пакеты могут требовать дополнительного времени")
-                install_packages_with_yay(self.username, YAY_PACKAGES, self.askpass_script, self.sudo_password)
+                install_packages_with_paru(self.username, PARU_PACKAGES)
 
-            # Установка пакетов через pacman
-            if PACMAN_PACKAGES:
-                print(f"\n📦 Установка {len(PACMAN_PACKAGES)} пакетов через pacman...")
-                install_packages_with_pacman(PACMAN_PACKAGES)
-                print("✅ Пакеты через pacman успешно установлены!")
-                
             print("\n🎉 Установка пакетов завершена!")
             return True
-            
+
         except Exception as e:
             print(f"\n❌ Ошибка при установке пакетов: {e}")
             return False
 
     def step_2_setup_samba(self):
         """Шаг 2: Настройка Samba сервера"""
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🖥️  ШАГ 2: НАСТРОЙКА SAMBA СЕРВЕРА")
-        print("="*60)
-        
+        print("=" * 60)
+
         try:
-            # Создаём экземпляр SambaAutoSetup с предварительно установленным паролем
-            samba_setup = SambaAutoSetup()
-            samba_setup.sudo_password = self.sudo_password
-            
-            # Пропускаем запрос пароля в samba_setup
-            print("✅ Используем уже введённый пароль sudo")
-            
+            samba_setup = SambaAutoSetup(username=self.username)
+
             # Создаём директории
             print("\n📁 Создание необходимых директорий...")
             if not samba_setup.create_directories():
@@ -188,9 +129,9 @@ class AutoSetupMaster:
             ]
 
             failed_steps = []
-            
+
             for step_name, step_func in steps:
-                print(f"\n{'─'*30}")
+                print(f"\n{'─' * 30}")
                 print(f"⚙️  {step_name}...")
                 try:
                     result = step_func()
@@ -213,7 +154,7 @@ class AutoSetupMaster:
                 for step in failed_steps:
                     print(f"  ❌ {step}")
                 return False
-                
+
         except Exception as e:
             print(f"\n❌ Критическая ошибка при настройке Samba: {e}")
             return False
@@ -230,29 +171,25 @@ class AutoSetupMaster:
         
         # Проверяем требования
         self.check_requirements()
-        
-        # Получаем пароль один раз
-        if not self.get_sudo_password():
-            return False
-            
+
         success_steps = 0
         total_steps = 2
-        
+
         # Шаг 1: Установка пакетов
         if self.step_1_install_packages():
             success_steps += 1
         else:
             print("⚠️  Продолжаем несмотря на ошибки установки пакетов...")
-            
+
         # Шаг 2: Настройка Samba
         if self.step_2_setup_samba():
             success_steps += 1
-            
+
         # Финальные итоги
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🏁 ИТОГИ АВТОМАТИЧЕСКОЙ НАСТРОЙКИ")
-        print("="*60)
-        
+        print("=" * 60)
+
         if success_steps == total_steps:
             print("🎉 ВСЕ ШАГИ ВЫПОЛНЕНЫ УСПЕШНО!")
             print("\n📋 Что было настроено:")
@@ -261,42 +198,31 @@ class AutoSetupMaster:
             print("  ✅ Службы запущены и работают")
             print("  ✅ Файрвол настроен")
             print("  ✅ Проведено тестирование")
-            
+
             print("\n🌐 Ваш Samba сервер готов к использованию!")
             print("📂 Доступные общие папки:")
-            print("  • shared - /home/boss/Загрузки/")
-            print("  • games - /mnt/aee8e7a9-5710-4dbb-bb8e-982c833a085f")  
+            print(f"  • shared - /home/{self.username}/Загрузки/")
+            print("  • games - /mnt/aee8e7a9-5710-4dbb-bb8e-982c833a085f")
             print("  • home2 - /mnt/Home2")
-            
+
             print("\n🧪 Для дополнительного тестирования запустите:")
             print("  ./code/test_samba.py")
-            
+
         elif success_steps > 0:
             print(f"⚠️  ЧАСТИЧНЫЙ УСПЕХ ({success_steps}/{total_steps} шагов)")
             print("Некоторые шаги выполнены, но есть ошибки.")
             print("Проверьте логи выше для диагностики проблем.")
-            
+
         else:
             print("❌ НАСТРОЙКА ЗАВЕРШИЛАСЬ С ОШИБКАМИ")
             print("Проверьте логи выше и повторите процесс.")
-            
-        print("\n💡 Пароль root был запрошен только один раз!")
-        print("Процесс автоматизации завершён.")
-        
+
+        print("\nПроцесс автоматизации завершён.")
         return success_steps == total_steps
 
     def cleanup(self):
-        """Очистка временных файлов и паролей"""
-        try:
-            # Очищаем пароль из памяти
-            self.sudo_password = None
-            
-            # Удаляем временный askpass скрипт
-            if self.askpass_script:
-                remove_askpass_script(self.askpass_script)
-                
-        except Exception as e:
-            print(f"⚠️  Ошибка при очистке: {e}")
+        """Очистка временных ресурсов"""
+        pass
 
 def main():
     """Главная функция"""

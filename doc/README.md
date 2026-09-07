@@ -4,13 +4,13 @@
 
 ## 🌟 Основные возможности
 
-- 🔐 **Единый запрос пароля** - пароль root запрашивается только один раз (или через переменные окружения)
-- 📦 **Автоматическая установка пакетов** - через yay (AUR) и pacman
+- 🔐 **Модель привилегий Linux** - запуск через `pkexec` или `sudo` без лишних запросов паролей
+- 📦 **Автоматическая установка пакетов** - через paru (AUR и официальные репозитории)
 - 🖥️ **Настройка Samba сервера** - полная автоматизация от А до Я
 - 🧪 **Тестирование работоспособности** - проверка всех компонентов
 - 📊 **Детальная отчётность** - прогресс каждого шага
-- 🛡️ **Безопасность** - пароли не сохраняются, временные файлы очищаются
-- ⚙️ **Поддержка переменных окружения** - для автоматизации CI/CD и скриптов
+- 🛡️ **Безопасность** - разделение привилегий, пароли не хранятся, временные файлы очищаются
+- ⚙️ **Поддержка переменных окружения** - `SAMBA_PASSWORD` для автоматизации настройки Samba
 
 ## 🎯 Быстрый старт
 
@@ -21,6 +21,8 @@ git clone <repository-url> auto_setup
 cd auto_setup
 
 # Запускаем полную настройку (РЕКОМЕНДУЕМЫЙ СПОСОБ)
+pkexec python3 main.py
+# или
 sudo python3 main.py
 ```
 
@@ -57,6 +59,8 @@ auto_setup/
 
 **Использование:**
 ```bash
+pkexec python3 main.py
+# или
 sudo python3 main.py
 ```
 
@@ -66,14 +70,16 @@ sudo python3 main.py
 **Автоматическая установка необходимых пакетов**
 
 **Возможности:**
-- Установка yay (AUR helper)
-- Установка пакетов из AUR
-- Установка пакетов из официальных репозиториев
+- Установка paru (AUR helper) при отсутствии
+- Установка пакетов через paru (официальные репозитории + AUR)
 - Retry механизм для проблемных пакетов
 - Обработка тайм-аутов
+- Безопасное разделение привилегий
 
 **Самостоятельное использование:**
 ```bash
+pkexec python3 code/install.py
+# или
 sudo python3 code/install.py
 ```
 
@@ -82,7 +88,7 @@ sudo python3 code/install.py
 
 **Возможности:**
 - Настройка прав доступа
-- Конфигурация smb.conf
+- Конфигурация smb.conf (атомарная запись)
 - Управление пользователями
 - Запуск служб
 - Настройка файрвола
@@ -90,6 +96,8 @@ sudo python3 code/install.py
 
 **Самостоятельное использование:**
 ```bash
+pkexec python3 code/samba_auto_setup.py
+# или
 sudo python3 code/samba_auto_setup.py
 ```
 
@@ -116,19 +124,11 @@ python3 code/test_samba.py
 Отредактируйте файл `code/install.py`:
 
 ```python
-# Пакеты из AUR (через yay)
-YAY_PACKAGES = [
-    'yandex-music',
-    'pycharm-professional',
+# Пакеты для установки через paru (официальные репозитории + AUR)
+PARU_PACKAGES = [
     'google-chrome',
-    # Добавьте свои пакеты здесь
-]
-
-# Пакеты из официальных репозиториев
-PACMAN_PACKAGES = [
-    'samba',
-    'vlc', 
     'telegram-desktop',
+    'visual-studio-code-bin',
     # Добавьте свои пакеты здесь
 ]
 ```
@@ -158,23 +158,27 @@ PACMAN_PACKAGES = [
 ### Сценарий 1: Полная настройка новой системы
 ```bash
 # Рекомендуемый способ - всё в одном
+pkexec python3 main.py
+# или
 sudo python3 main.py
 
-# Или с переменными окружения для автоматизации
-export SUDO_PASSWORD="your_password"
-export SAMBA_PASSWORD="your_samba_password"
-sudo -E python3 main.py
+# С переменной пароля Samba для полностью автоматической настройки
+SAMBA_PASSWORD="your_samba_password" sudo -E python3 main.py
 ```
 
 ### Сценарий 2: Только установка пакетов
 ```bash
 # Если Samba уже настроен или не нужен
+pkexec python3 code/install.py
+# или
 sudo python3 code/install.py
 ```
 
 ### Сценарий 3: Только настройка Samba
 ```bash
 # Если пакеты уже установлены
+pkexec python3 code/samba_auto_setup.py
+# или
 sudo python3 code/samba_auto_setup.py
 ```
 

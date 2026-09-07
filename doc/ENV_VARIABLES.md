@@ -1,62 +1,43 @@
-# 🔐 Использование переменных окружения для паролей
+# 🔐 Использование переменных окружения
 
-Для автоматизации и удобства можно использовать переменные окружения вместо ручного ввода паролей.
+Скрипт запускается с правами суперпользователя через `pkexec` или `sudo`, поэтому ручной ввод и передача пароля root/sudo в скрипт **больше не требуются**.
+
+Для полной автоматизации настройки Samba можно использовать переменную окружения для пароля Samba-пользователя.
 
 ## 🌟 Поддерживаемые переменные
-
-### Для sudo пароля:
-- `SUDO_PASSWORD` - основной вариант
-- `AUTO_SETUP_PASSWORD` - альтернативный вариант
 
 ### Для пароля Samba пользователя:
 - `SAMBA_PASSWORD` - основной вариант
 - `AUTO_SETUP_SAMBA_PASSWORD` - альтернативный вариант
 
+> [!NOTE]
+> Переменные `SUDO_PASSWORD` и `AUTO_SETUP_PASSWORD` устарели (deprecated) и больше не используются, так как повышение привилегий выполняется стандартными средствами Linux (`pkexec` или `sudo`) до запуска скрипта.
+
 ## 📖 Примеры использования
 
-### Пример 1: Однократный запуск с переменными окружения
+### Пример 1: Запуск с переменной окружения через pkexec или sudo
 
 ```bash
-# Установить переменные и запустить
-export SUDO_PASSWORD="your_sudo_password"
+# Установить переменную пароля Samba и запустить
 export SAMBA_PASSWORD="your_samba_password"
+pkexec env SAMBA_PASSWORD="$SAMBA_PASSWORD" python3 main.py
+# или через sudo:
 sudo -E python3 main.py
 ```
-
-**Важно:** Используйте `sudo -E` чтобы сохранить переменные окружения при запуске с sudo.
 
 ### Пример 2: Запуск в одной команде
 
 ```bash
-# Запуск с переменными в одной команде
-SUDO_PASSWORD="your_sudo_password" SAMBA_PASSWORD="your_samba_password" sudo -E python3 main.py
+SAMBA_PASSWORD="your_samba_password" sudo -E python3 main.py
 ```
 
-### Пример 3: Использование только sudo пароля
+### Пример 3: Запуск без переменных (интерактивный ввод пароля Samba)
 
 ```bash
-# Если нужен только sudo пароль, а Samba пароль введёте вручную
-export SUDO_PASSWORD="your_sudo_password"
-sudo -E python3 main.py
+pkexec python3 main.py
+# или
+sudo python3 main.py
 ```
-
-### Пример 4: Создание файла .env (для разработки)
-
-```bash
-# Создать файл .env (не коммитьте его в git!)
-cat > .env << EOF
-export SUDO_PASSWORD="your_sudo_password"
-export SAMBA_PASSWORD="your_samba_password"
-EOF
-
-# Загрузить переменные и запустить
-source .env
-sudo -E python3 main.py
-```
-
-**⚠️ ВАЖНО:** Файл `.env` уже добавлен в `.gitignore` и не будет коммититься в репозиторий.
-
-### Пример 5: Использование в скриптах автоматизации
 
 ```bash
 #!/bin/bash
@@ -103,17 +84,12 @@ sudo -E python3 /path/to/auto_setup/main.py
 
 ## 🔄 Приоритет использования
 
-Скрипт проверяет переменные окружения в следующем порядке:
+Скрипт проверяет переменную окружения для Samba пароля в следующем порядке:
 
-1. **Для sudo пароля:**
-   - Сначала `SUDO_PASSWORD`
-   - Затем `AUTO_SETUP_PASSWORD`
-   - Если не найдены - запрашивает вручную
-
-2. **Для Samba пароля:**
+1. **Для Samba пароля:**
    - Сначала `SAMBA_PASSWORD`
    - Затем `AUTO_SETUP_SAMBA_PASSWORD`
-   - Если не найдены - запрашивает вручную
+   - Если не найдены - запрашивает интерактивно
 
 ## 💡 Примеры для разных сценариев
 
@@ -131,28 +107,9 @@ jobs:
       - uses: actions/checkout@v2
       - name: Run auto setup
         env:
-          SUDO_PASSWORD: ${{ secrets.SUDO_PASSWORD }}
           SAMBA_PASSWORD: ${{ secrets.SAMBA_PASSWORD }}
         run: |
           sudo -E python3 main.py
-```
-
-### Docker
-
-```dockerfile
-# Dockerfile
-FROM archlinux:latest
-
-# Устанавливаем зависимости
-RUN pacman -Syu --noconfirm python
-
-# Копируем проект
-COPY . /app
-WORKDIR /app
-
-# Используйте ARG для build-time или ENV для runtime
-ARG SUDO_PASSWORD
-ENV SUDO_PASSWORD=$SUDO_PASSWORD
 ```
 
 ### systemd service
@@ -164,24 +121,20 @@ Description=Auto Setup Service
 
 [Service]
 Type=oneshot
-Environment="SUDO_PASSWORD=your_password"
 Environment="SAMBA_PASSWORD=your_samba_password"
 ExecStart=/usr/bin/python3 /path/to/auto_setup/main.py
 ```
 
 ## 🧪 Проверка работы
 
-Проверить, что переменные окружения работают:
+Проверить, что переменная окружения доступна:
 
 ```bash
-# Установить переменную
-export SUDO_PASSWORD="test"
+export SAMBA_PASSWORD="test_samba_password"
+echo $SAMBA_PASSWORD
 
-# Проверить что она доступна
-echo $SUDO_PASSWORD  # Должно вывести: test
-
-# Запустить с sudo -E (важно!)
-sudo -E python3 -c "import os; print('Password:', os.getenv('SUDO_PASSWORD'))"
+# Проверить при запуске от root
+sudo -E python3 -c "import os; print('Samba password set:', bool(os.getenv('SAMBA_PASSWORD')))"
 ```
 
 ## 📚 Дополнительная информация
