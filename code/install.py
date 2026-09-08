@@ -44,11 +44,9 @@ PARU_PACKAGES = [
     'v2raya-bin',
 
     # Разработка и терминал
-    'cursor-bin',
     'visual-studio-code-bin',
     'antigravity-ide',
     'antigravity-cli',
-    'pycharm-professional',
     'uv',
     'fastfetch',
 
