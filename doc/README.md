@@ -20,7 +20,10 @@
 git clone <repository-url> auto_setup
 cd auto_setup
 
-# Запускаем полную настройку (РЕКОМЕНДУЕМЫЙ СПОСОБ)
+# Запускаем полную настройку (скрипт сам запросит права через pkexec / sudo):
+python3 main.py
+
+# Или напрямую с правами суперпользователя:
 pkexec python3 main.py
 # или
 sudo python3 main.py

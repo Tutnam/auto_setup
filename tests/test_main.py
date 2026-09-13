@@ -80,5 +80,33 @@ class TestAutoSetupMaster(unittest.TestCase):
         mock_step_2.assert_called_once()
 
 
+class TestMainEntryPoint(unittest.TestCase):
+    """Тестирование функции верхнего уровня main()."""
+
+    @patch("main.check_root")
+    @patch("main.AutoSetupMaster")
+    @patch("sys.exit")
+    def test_main_calls_check_root_first(self, mock_exit, mock_master_cls, mock_check_root):
+        """main() вызывает check_root() перед созданием AutoSetupMaster."""
+        mock_instance = MagicMock()
+        mock_instance.run_full_setup.return_value = True
+        mock_master_cls.return_value = mock_instance
+
+        main.main()
+
+        mock_check_root.assert_called_once()
+        mock_master_cls.assert_called_once()
+        mock_instance.run_full_setup.assert_called_once()
+        mock_exit.assert_called_once_with(0)
+
+    @patch("main.check_root")
+    @patch("main.AutoSetupMaster", side_effect=KeyboardInterrupt)
+    @patch("sys.exit")
+    def test_main_keyboard_interrupt(self, mock_exit, mock_master_cls, mock_check_root):
+        """main() перехватывает KeyboardInterrupt и завершается с кодом 130."""
+        main.main()
+        mock_exit.assert_called_once_with(130)
+
+
 if __name__ == "__main__":
     unittest.main()

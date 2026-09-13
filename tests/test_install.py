@@ -19,24 +19,117 @@ import install
 
 
 class TestCheckRoot(unittest.TestCase):
-    """Тестирование проверки прав суперпользователя."""
+    """Тестирование автоповышения привилегий и проверки root."""
 
     @patch("os.geteuid", return_value=0)
-    def test_check_root_success(self, mock_geteuid):
+    def test_check_root_already_root(self, mock_geteuid):
+        """Когда процесс уже запущен от root, никаких действий не предпринимается."""
         try:
             install.check_root()
         except SystemExit:
             self.fail("check_root() вызвал SystemExit при euid == 0")
 
+    @patch("sys.exit")
+    @patch("subprocess.run")
+    @patch("shutil.which")
     @patch("os.geteuid", return_value=1000)
-    @patch("builtins.print")
-    def test_check_root_failure(self, mock_print, mock_geteuid):
-        with self.assertRaises(SystemExit) as cm:
+    def test_check_root_pkexec_success(self, mock_geteuid, mock_which, mock_run, mock_exit):
+        """Успешный запуск через pkexec завершается с sys.exit(0)."""
+        mock_which.side_effect = lambda tool: f"/usr/bin/{tool}"
+        mock_proc = MagicMock(returncode=0)
+        mock_run.return_value = mock_proc
+
+        with patch.dict(os.environ, {}, clear=True):
             install.check_root()
-        self.assertEqual(cm.exception.code, 1)
-        mock_print.assert_called_with(
-            "Этот скрипт требует прав суперпользователя. Запустите через pkexec или sudo."
-        )
+
+        mock_run.assert_called_once()
+        cmd_called = mock_run.call_args[0][0]
+        self.assertEqual(cmd_called[0], "pkexec")
+        self.assertEqual(cmd_called[1], sys.executable)
+        env_called = mock_run.call_args[1]["env"]
+        self.assertEqual(env_called.get("AUTO_SETUP_NO_ESCALATE"), "1")
+        mock_exit.assert_called_once_with(0)
+
+    @patch("sys.exit")
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    @patch("os.geteuid", return_value=1000)
+    def test_check_root_pkexec_failure_sudo_success(self, mock_geteuid, mock_which, mock_run, mock_exit):
+        """При отказе pkexec (код 126) происходит бесшовный fallback на sudo -E."""
+        mock_which.side_effect = lambda tool: f"/usr/bin/{tool}"
+        proc_pkexec = MagicMock(returncode=126)
+        proc_sudo = MagicMock(returncode=0)
+        mock_run.side_effect = [proc_pkexec, proc_sudo]
+
+        with patch.dict(os.environ, {}, clear=True):
+            install.check_root()
+
+        self.assertEqual(mock_run.call_count, 2)
+        cmd_sudo = mock_run.call_args_list[1][0][0]
+        self.assertEqual(cmd_sudo[:2], ["sudo", "-E"])
+        mock_exit.assert_called_once_with(0)
+
+    @patch("sys.exit")
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    @patch("os.geteuid", return_value=1000)
+    def test_check_root_no_pkexec_uses_sudo(self, mock_geteuid, mock_which, mock_run, mock_exit):
+        """Когда pkexec отсутствует в системе, сразу используется sudo."""
+        mock_which.side_effect = lambda tool: "/usr/bin/sudo" if tool == "sudo" else None
+        proc_sudo = MagicMock(returncode=0)
+        mock_run.return_value = proc_sudo
+
+        with patch.dict(os.environ, {}, clear=True):
+            install.check_root()
+
+        mock_run.assert_called_once()
+        cmd_sudo = mock_run.call_args[0][0]
+        self.assertEqual(cmd_sudo[:2], ["sudo", "-E"])
+        mock_exit.assert_called_once_with(0)
+
+    @patch("sys.exit")
+    @patch("subprocess.run")
+    @patch("shutil.which", return_value=None)
+    @patch("os.geteuid", return_value=1000)
+    def test_check_root_no_tools_available(self, mock_geteuid, mock_which, mock_run, mock_exit):
+        """Если ни pkexec, ни sudo не найдены, скрипт выходит с ошибкой 1."""
+        with patch.dict(os.environ, {}, clear=True):
+            install.check_root()
+
+        mock_run.assert_not_called()
+        mock_exit.assert_called_once_with(1)
+
+    @patch("sys.exit")
+    @patch("subprocess.run", side_effect=KeyboardInterrupt)
+    @patch("shutil.which", return_value="/usr/bin/pkexec")
+    @patch("os.geteuid", return_value=1000)
+    def test_check_root_keyboard_interrupt(self, mock_geteuid, mock_which, mock_run, mock_exit):
+        """При отмене пользователем (Ctrl+C) происходит выход с кодом 130 без traceback."""
+        with patch.dict(os.environ, {}, clear=True):
+            install.check_root()
+
+        mock_exit.assert_called_once_with(130)
+
+    @patch("subprocess.run")
+    @patch("os.geteuid", return_value=1000)
+    def test_check_root_suppressed_by_env(self, mock_geteuid, mock_run):
+        """Подавление автоповышения через AUTO_SETUP_NO_ESCALATE=1."""
+        with patch.dict(os.environ, {"AUTO_SETUP_NO_ESCALATE": "1"}):
+            with self.assertRaises(SystemExit) as cm:
+                install.check_root()
+            self.assertEqual(cm.exception.code, 1)
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    @patch("os.geteuid", return_value=1000)
+    def test_check_root_suppressed_by_flag(self, mock_geteuid, mock_run):
+        """Подавление автоповышения через аргумент --no-escalate."""
+        with patch.object(sys, "argv", ["install.py", "--no-escalate"]):
+            with patch.dict(os.environ, {}, clear=True):
+                with self.assertRaises(SystemExit) as cm:
+                    install.check_root()
+                self.assertEqual(cm.exception.code, 1)
+        mock_run.assert_not_called()
 
 
 class TestGetUsername(unittest.TestCase):

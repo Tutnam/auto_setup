@@ -226,22 +226,26 @@ class AutoSetupMaster:
 
 def main():
     """Главная функция"""
-    setup_master = AutoSetupMaster()
-    
+    # Проверка прав root и автоэскалация до создания объекта и вывода баннеров
+    check_root()
+
+    setup_master = None
     try:
+        setup_master = AutoSetupMaster()
         success = setup_master.run_full_setup()
         sys.exit(0 if success else 1)
         
     except KeyboardInterrupt:
         print("\n\n⚠️  Процесс прерван пользователем")
-        sys.exit(1)
+        sys.exit(130)
         
     except Exception as e:
         print(f"\n❌ Критическая ошибка: {e}")
         sys.exit(1)
         
     finally:
-        setup_master.cleanup()
+        if setup_master is not None:
+            setup_master.cleanup()
 
 if __name__ == "__main__":
     main()

@@ -73,11 +73,62 @@ PARU_PACKAGES = [
 ]
 
 
+def is_escalation_suppressed() -> bool:
+    """Проверяет, подавлено ли автоповышение прав (через env или флаг)."""
+    if os.getenv("AUTO_SETUP_NO_ESCALATE") == "1":
+        return True
+    if "--no-escalate" in sys.argv:
+        return True
+    return False
+
+
 def check_root() -> None:
-    """Проверяет запуск с правами суперпользователя."""
-    if os.geteuid() != 0:
-        print("Этот скрипт требует прав суперпользователя. Запустите через pkexec или sudo.")
+    """
+    Проверяет запуск с правами суперпользователя.
+    При запуске от обычного пользователя инициирует автоповышение прав
+    через pkexec с fallback на sudo.
+    """
+    if os.geteuid() == 0:
+        return
+
+    if is_escalation_suppressed():
+        print("❌ Этот скрипт требует прав суперпользователя.")
+        print("Автоповышение прав подавлено (AUTO_SETUP_NO_ESCALATE=1 или --no-escalate).")
+        print("Запустите скрипт вручную: pkexec python3 ... или sudo python3 ...")
         sys.exit(1)
+
+    script_path = str(Path(sys.argv[0]).resolve())
+    clean_args = [arg for arg in sys.argv[1:] if arg != "--no-escalate"]
+    exec_target = [sys.executable, script_path] + clean_args
+
+    # Защита от fork-bomb: дочерний процесс не должен повторно запускать эскалацию
+    child_env = os.environ.copy()
+    child_env["AUTO_SETUP_NO_ESCALATE"] = "1"
+
+    has_pkexec = bool(shutil.which("pkexec"))
+    has_sudo = bool(shutil.which("sudo"))
+
+    try:
+        if has_pkexec:
+            print("⚠️  Требуются права суперпользователя. Запрос привилегий через pkexec...")
+            proc = subprocess.run(["pkexec"] + exec_target, env=child_env)
+            if proc.returncode == 0:
+                sys.exit(0)
+                return
+            print(f"⚠️  Polkit (pkexec) завершился с кодом {proc.returncode}. Переход к аутентификации через sudo...")
+
+        if has_sudo:
+            proc = subprocess.run(["sudo", "-E"] + exec_target, env=child_env)
+            sys.exit(proc.returncode)
+            return
+
+        print("❌ Утилиты pkexec и sudo не найдены. Невозможно повысить привилегии.")
+        sys.exit(1)
+        return
+    except KeyboardInterrupt:
+        print("\nОперация отменена пользователем.")
+        sys.exit(130)
+        return
 
 
 @contextlib.contextmanager
